@@ -720,9 +720,27 @@ jobs:
               run: |
                   Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-ManagementConsole, IIS-HttpErrors, IIS-HttpRedirect, IIS-WindowsAuthentication, IIS-StaticContent, IIS-DefaultDocument, IIS-HttpCompressionStatic, IIS-DirectoryBrowsing, IIS-WebServerManagementTools, IIS-CGI -All
                   Set-Service wuauserv -StartupType Manual
-                  (Get-Content ${env:GITHUB_WORKSPACE}\phpBB4\phpBB\web.config).replace("<configuration>", "<configuration>`n`t<system.web>`n`t`t<customErrors mode=`"Off`"/>`n`t</system.web>") | Set-Content ${env:GITHUB_WORKSPACE}\phpBB4\phpBB\web.config
-                  (Get-Content ${env:GITHUB_WORKSPACE}\phpBB4\phpBB\web.config).replace("`t</system.webServer>", "`t`t<httpErrors errorMode=`"Detailed`" />`n`t</system.webServer>") | Set-Content ${env:GITHUB_WORKSPACE}\phpBB4\phpBB\web.config
-                  choco install urlrewrite -y
+                  $webConfig = "${env:GITHUB_WORKSPACE}\phpBB3\phpBB\web.config"
+                  $content = Get-Content $webConfig -Raw
+                  $content = $content.Replace(
+                      "<configuration>",
+                      "<configuration>`n`t<system.web>`n`t`t<customErrors mode=`"Off`"/>`n`t</system.web>"
+                  )
+                  $content = $content.Replace(
+                      "`t</system.webServer>",
+                      "`t`t<httpErrors errorMode=`"Detailed`" />`n`t</system.webServer>"
+                  )
+                  $rewriteInstalled = $false
+                  try {
+                      choco install urlrewrite -y --no-progress
+                      $rewriteInstalled = $true
+                  } catch {
+                      Write-Warning "URL Rewrite installation failed; continuing without rewrite-specific IIS configuration."
+                  }
+                  if (-not $rewriteInstalled) {
+                      $content = $content -replace "(?s)`r?`n\s*<rewrite>.*?</rewrite>", ""
+                  }
+                  Set-Content $webConfig -Value $content -Encoding UTF8
                   Import-Module WebAdministration
                   New-WebSite -Name 'phpBBTest' -PhysicalPath "${env:GITHUB_WORKSPACE}\phpBB4\phpBB" -Force
                   $session = Get-PSSession -Name WinPSCompatSession
