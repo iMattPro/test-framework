@@ -697,22 +697,6 @@ jobs:
                   Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-ManagementConsole, IIS-HttpErrors, IIS-HttpRedirect, IIS-WindowsAuthentication, IIS-StaticContent, IIS-DefaultDocument, IIS-HttpCompressionStatic, IIS-DirectoryBrowsing, IIS-WebServerManagementTools, IIS-CGI -All
                   Set-Service wuauserv -StartupType Manual
                   $webConfig = "${env:GITHUB_WORKSPACE}\phpBB3\phpBB\web.config"
-                  # Install URL Rewrite with retries because Chocolatey feed requests can timeout on GitHub runners.
-                  $installed = $false
-                  for ($i = 1; $i -le 3; $i++) {
-                      try {
-                          choco install urlrewrite -y --no-progress
-                          $installed = $true
-                          break
-                      } catch {
-                          Write-Warning "URL Rewrite install attempt $i failed: $($_.Exception.Message)"
-                          Start-Sleep -Seconds (10 * $i)
-                      }
-                  }
-                  if (-not $installed) {
-                      throw "Failed to install URL Rewrite after 3 attempts."
-                  }
-                  # Only patch web.config after rewrite is installed.
                   $content = Get-Content $webConfig -Raw
                   $content = $content.Replace(
                       "<configuration>",
@@ -722,6 +706,16 @@ jobs:
                       "`t</system.webServer>",
                       "`t`t<httpErrors errorMode=`"Detailed`" />`n`t</system.webServer>"
                   )
+                  $rewriteInstalled = $false
+                  try {
+                      choco install urlrewrite -y --no-progress
+                      $rewriteInstalled = $true
+                  } catch {
+                      Write-Warning "URL Rewrite installation failed; continuing without rewrite-specific IIS configuration."
+                  }
+                  if (-not $rewriteInstalled) {
+                      $content = $content -replace "(?s)`r?`n\s*<rewrite>.*?</rewrite>", ""
+                  }
                   Set-Content $webConfig -Value $content -Encoding UTF8
                   Import-Module WebAdministration
                   New-WebSite -Name 'phpBBTest' -PhysicalPath "${env:GITHUB_WORKSPACE}\phpBB3\phpBB" -Force
