@@ -721,15 +721,17 @@ jobs:
                   Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-ManagementConsole, IIS-HttpErrors, IIS-HttpRedirect, IIS-WindowsAuthentication, IIS-StaticContent, IIS-DefaultDocument, IIS-HttpCompressionStatic, IIS-DirectoryBrowsing, IIS-WebServerManagementTools, IIS-CGI -All
                   Set-Service wuauserv -StartupType Manual
                   $webConfig = "${env:GITHUB_WORKSPACE}\phpBB4\phpBB\web.config"
-                  $content = Get-Content $webConfig -Raw
-                  $content = $content.Replace(
-                      "<configuration>",
-                      "<configuration>`n`t<system.web>`n`t`t<customErrors mode=`"Off`"/>`n`t</system.web>"
-                  )
-                  $content = $content.Replace(
-                      "`t</system.webServer>",
-                      "`t`t<httpErrors errorMode=`"Detailed`" />`n`t</system.webServer>"
-                  )
+                  [xml]$webConfigXml = Get-Content $webConfig -Raw
+                  $configuration = $webConfigXml.SelectSingleNode('/configuration')
+                  $systemWebServer = $webConfigXml.SelectSingleNode('/configuration/system.webServer')
+                  $systemWeb = $webConfigXml.CreateElement('system.web')
+                  $customErrors = $webConfigXml.CreateElement('customErrors')
+                  $customErrors.SetAttribute('mode', 'Off')
+                  [void]$systemWeb.AppendChild($customErrors)
+                  [void]$configuration.InsertBefore($systemWeb, $systemWebServer)
+                  $httpErrors = $webConfigXml.CreateElement('httpErrors')
+                  $httpErrors.SetAttribute('errorMode', 'Detailed')
+                  [void]$systemWebServer.AppendChild($httpErrors)
                   $rewriteInstalled = $false
                   try {
                       choco install urlrewrite -y --no-progress
@@ -742,9 +744,12 @@ jobs:
                       Write-Warning "URL Rewrite installation failed: $($_.Exception.Message); continuing without rewrite-specific IIS configuration."
                   }
                   if (-not $rewriteInstalled) {
-                      $content = $content -replace "(?s)`r?`n\s*<rewrite>.*?</rewrite>", ""
+                      $rewrite = $webConfigXml.SelectSingleNode('/configuration/system.webServer/rewrite')
+                      if ($null -ne $rewrite) {
+                          [void]$systemWebServer.RemoveChild($rewrite)
+                      }
                   }
-                  Set-Content $webConfig -Value $content -Encoding UTF8
+                  $webConfigXml.Save($webConfig)
                   Import-Module WebAdministration
                   New-WebSite -Name 'phpBBTest' -PhysicalPath "${env:GITHUB_WORKSPACE}\phpBB4\phpBB" -Force
                   $session = Get-PSSession -Name WinPSCompatSession
@@ -756,7 +761,7 @@ jobs:
                   [System.Environment]::SetEnvironmentVariable('PATH',$Env:PATH+";%windir%\system32\inetsrv")
                   echo Setup FAST-CGI configuration
                   Add-WebConfiguration -Filter /system.webServer/fastCgi -PSPath IIS:\ -Value @{fullpath="C:\tools\php\php-cgi.exe"}
-                  echo Setup FACT-CGI handler
+                  echo Setup FAST-CGI handler
                   New-WebHandler -Name "PHP-FastCGI" -Path "*.php" -Modules FastCgiModule -ScriptProcessor "C:\tools\php\php-cgi.exe" -Verb '*' -ResourceType Either
                   iisreset
                   NET START W3SVC
